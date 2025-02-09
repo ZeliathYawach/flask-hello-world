@@ -51,6 +51,9 @@ def process_image():
             api_name="/leffa_predict_vt"
         )
 
+        # Debug: log the result from the model
+        print("Model result:", result)
+
         # Process the result, which might be a list, tuple, or dict containing image paths.
         if isinstance(result, list):
             processed_image_paths = result
@@ -59,7 +62,7 @@ def process_image():
         elif isinstance(result, dict) and "image_path" in result:
             processed_image_paths = [result["image_path"]]
         else:
-            return jsonify({"error": "Processed image path(s) not found in response"}), 500
+            return jsonify({"error": "Processed image path(s) not found in response", "result": result}), 500
 
         if not processed_image_paths:
             return jsonify({"error": "No processed image paths found in response"}), 500
@@ -67,10 +70,26 @@ def process_image():
         # Upload each processed image to Imgbb and collect the URLs
         imgbb_urls = []
         for path in processed_image_paths:
+            # Skip empty or None paths.
+            if not path:
+                print("Received an empty file path from the model.")
+                continue
+            # Verify the file exists.
+            if not os.path.exists(path):
+                print(f"File not found: {path}")
+                continue
             url = upload_to_imgbb(path)
             imgbb_urls.append(url)
 
-        return jsonify({"processed_image_urls": imgbb_urls})
+        # If no files were successfully uploaded, return an error.
+        if not imgbb_urls:
+            return jsonify({"error": "No images were uploaded to Imgbb"}), 500
+
+        # Return a single URL if only one, or a list of URLs if multiple.
+        if len(imgbb_urls) == 1:
+            return jsonify({"processed_image_url": imgbb_urls[0]})
+        else:
+            return jsonify({"processed_image_urls": imgbb_urls})
 
     except httpx.ProxyError as e:
         print(f"Proxy error occurred: {e}")
@@ -79,7 +98,7 @@ def process_image():
         print(f"An error occurred: {e}")
         return jsonify({"error": "An error occurred", "details": str(e)}), 500
     finally:
-        # Ensure all processed image files are removed after processing
+        # Ensure all processed image files are removed after processing.
         for path in processed_image_paths:
             if path and os.path.exists(path):
                 try:
