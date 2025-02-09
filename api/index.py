@@ -24,7 +24,7 @@ def upload_to_imgbb(file_path):
 
 @app.route('/process-image', methods=['POST'])
 def process_image():
-    processed_image_paths = []  # List to store one or more processed image file paths
+    processed_image_paths = None  # Will hold a list of one or more image paths for cleanup
     try:
         # Expecting JSON input with 'src_image_url' and 'ref_image_url'
         data = request.get_json()
@@ -51,45 +51,27 @@ def process_image():
             api_name="/leffa_predict_vt"
         )
 
-        # Debug: log the result from the model
-        print("Model result:", result)
-
-        # Process the result, which might be a list, tuple, or dict containing image paths.
-        if isinstance(result, list):
-            processed_image_paths = result
-        elif isinstance(result, tuple):
+        # Extract the processed image paths from the result.
+        # The result may be a list/tuple of image paths or a dict with a key "image_path"
+        if isinstance(result, (list, tuple)):
             processed_image_paths = list(result)
-        elif isinstance(result, dict) and "image_path" in result:
-            processed_image_paths = [result["image_path"]]
+        elif isinstance(result, dict):
+            image_path = result.get("image_path")
+            if isinstance(image_path, list):
+                processed_image_paths = image_path
+            else:
+                processed_image_paths = [image_path]
         else:
-            return jsonify({"error": "Processed image path(s) not found in response", "result": result}), 500
+            return jsonify({"error": "Unexpected result format from prediction"}), 500
 
-        if not processed_image_paths:
-            return jsonify({"error": "No processed image paths found in response"}), 500
+        # Ensure we have at least one valid image path
+        if not processed_image_paths or not processed_image_paths[0]:
+            return jsonify({"error": "Processed image path not found in response"}), 500
 
-        # Upload each processed image to Imgbb and collect the URLs
-        imgbb_urls = []
-        for path in processed_image_paths:
-            # Skip empty or None paths.
-            if not path:
-                print("Received an empty file path from the model.")
-                continue
-            # Verify the file exists.
-            if not os.path.exists(path):
-                print(f"File not found: {path}")
-                continue
-            url = upload_to_imgbb(path)
-            imgbb_urls.append(url)
+        # Use the first image for uploading
+        imgbb_url = upload_to_imgbb(processed_image_paths[0])
 
-        # If no files were successfully uploaded, return an error.
-        if not imgbb_urls:
-            return jsonify({"error": "No images were uploaded to Imgbb"}), 500
-
-        # Return a single URL if only one, or a list of URLs if multiple.
-        if len(imgbb_urls) == 1:
-            return jsonify({"processed_image_url": imgbb_urls[0]})
-        else:
-            return jsonify({"processed_image_urls": imgbb_urls})
+        return jsonify({"processed_image_url": imgbb_url})
 
     except httpx.ProxyError as e:
         print(f"Proxy error occurred: {e}")
@@ -98,14 +80,15 @@ def process_image():
         print(f"An error occurred: {e}")
         return jsonify({"error": "An error occurred", "details": str(e)}), 500
     finally:
-        # Ensure all processed image files are removed after processing.
-        for path in processed_image_paths:
-            if path and os.path.exists(path):
-                try:
-                    os.remove(path)
-                    print(f"Removed temporary file: {path}")
-                except Exception as cleanup_error:
-                    print(f"Error removing file {path}: {cleanup_error}")
+        # Cleanup all processed image files
+        if processed_image_paths:
+            for path in processed_image_paths:
+                if path and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                        print(f"Removed temporary file: {path}")
+                    except Exception as cleanup_error:
+                        print(f"Error removing file {path}: {cleanup_error}")
 
 if __name__ == '__main__':
     app.run(debug=True)
