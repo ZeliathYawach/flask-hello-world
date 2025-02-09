@@ -24,6 +24,7 @@ def upload_to_imgbb(file_path):
 
 @app.route('/process-image', methods=['POST'])
 def process_image():
+    processed_image_path = None  # Initialize here for cleanup in finally
     try:
         # Expecting JSON input with 'src_image_url' and 'ref_image_url'
         data = request.get_json()
@@ -62,10 +63,6 @@ def process_image():
         # Upload the processed image to Imgbb
         imgbb_url = upload_to_imgbb(processed_image_path)
 
-        # Optionally remove the processed image file if it was saved locally
-        if os.path.exists(processed_image_path):
-            os.remove(processed_image_path)
-
         return jsonify({"processed_image_url": imgbb_url})
 
     except httpx.ProxyError as e:
@@ -74,6 +71,14 @@ def process_image():
     except Exception as e:
         print(f"An error occurred: {e}")
         return jsonify({"error": "An error occurred", "details": str(e)}), 500
+    finally:
+        # Ensure the processed image file is removed after processing
+        if processed_image_path and os.path.exists(processed_image_path):
+            try:
+                os.remove(processed_image_path)
+                print(f"Removed temporary file: {processed_image_path}")
+            except Exception as cleanup_error:
+                print(f"Error removing file {processed_image_path}: {cleanup_error}")
 
 if __name__ == '__main__':
     app.run(debug=True)
