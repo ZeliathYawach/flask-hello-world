@@ -24,7 +24,7 @@ def upload_to_imgbb(file_path):
 
 @app.route('/process-image', methods=['POST'])
 def process_image():
-    processed_image_path = None  # Initialize here for cleanup in finally
+    processed_image_paths = []  # List to store one or more processed image file paths
     try:
         # Expecting JSON input with 'src_image_url' and 'ref_image_url'
         data = request.get_json()
@@ -51,19 +51,26 @@ def process_image():
             api_name="/leffa_predict_vt"
         )
 
-        # Extract the processed image path from the result
-        if isinstance(result, tuple):
-            processed_image_path = result[0]
+        # Process the result, which might be a list, tuple, or dict containing image paths.
+        if isinstance(result, list):
+            processed_image_paths = result
+        elif isinstance(result, tuple):
+            processed_image_paths = list(result)
+        elif isinstance(result, dict) and "image_path" in result:
+            processed_image_paths = [result["image_path"]]
         else:
-            processed_image_path = result.get("image_path")
+            return jsonify({"error": "Processed image path(s) not found in response"}), 500
 
-        if not processed_image_path:
-            return jsonify({"error": "Processed image path not found in response"}), 500
+        if not processed_image_paths:
+            return jsonify({"error": "No processed image paths found in response"}), 500
 
-        # Upload the processed image to Imgbb
-        imgbb_url = upload_to_imgbb(processed_image_path)
+        # Upload each processed image to Imgbb and collect the URLs
+        imgbb_urls = []
+        for path in processed_image_paths:
+            url = upload_to_imgbb(path)
+            imgbb_urls.append(url)
 
-        return jsonify({"processed_image_url": imgbb_url})
+        return jsonify({"processed_image_urls": imgbb_urls})
 
     except httpx.ProxyError as e:
         print(f"Proxy error occurred: {e}")
@@ -72,13 +79,14 @@ def process_image():
         print(f"An error occurred: {e}")
         return jsonify({"error": "An error occurred", "details": str(e)}), 500
     finally:
-        # Ensure the processed image file is removed after processing
-        if processed_image_path and os.path.exists(processed_image_path):
-            try:
-                os.remove(processed_image_path)
-                print(f"Removed temporary file: {processed_image_path}")
-            except Exception as cleanup_error:
-                print(f"Error removing file {processed_image_path}: {cleanup_error}")
+        # Ensure all processed image files are removed after processing
+        for path in processed_image_paths:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"Removed temporary file: {path}")
+                except Exception as cleanup_error:
+                    print(f"Error removing file {path}: {cleanup_error}")
 
 if __name__ == '__main__':
     app.run(debug=True)
